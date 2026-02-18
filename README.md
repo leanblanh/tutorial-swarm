@@ -1,4 +1,5 @@
 # Tutorial Docker Swarm
+# Tutorial 1 - Primeiros Passos
 
 Para seguir esse tutorial você vai precisar de uma máquina com a Docker Engine Instalada. https://docs.docker.com/desktop/setup/install/linux/ubuntu/
 
@@ -182,9 +183,27 @@ secrets:
     external: true
 ```
 **Nota**:
+
+
 `constraints: [node.role == manager]` (Nginx): Como só temos um node, essa regra é indiferente (o único node já é manager). Em clusters multi-node, usamos isso para garantir que o Nginx rode apenas em máquinas com IP público conhecido.
 
-**Executando o Deploy**
+**Nota**:
+
+Nunca use replicas: > 1 para bancos de dados SQL no Swarm sem uma estratégia de clusterização específica da aplicação (como o Repmgr ou Patroni). Para o nosso tutorial, mantenha o Postgres com 1 réplica.
+
+É fundamental distinguir disponibilidade de container de replicação de dados:
+
+**- Réplicas do Swarm**: São cópias idênticas do processo. Útil para APIs (que são stateless ou "sem estado"), onde tanto faz qual réplica responde.
+
+**- Cluster de Banco de Dados (Stateful)**: Exige uma arquitetura de Primary/Replica (ou Master/Slave). Para ter um cluster real, você precisaria de:
+
+1. Uma instância de Escrita (Primary).
+
+2. Uma ou mais instâncias de Leitura (Replica), que recebem cópias dos dados via rede.
+
+3. Um software de gerenciamento (como o Patroni ou Stolon) para orquestrar quem é o mestre
+
+### **Executando o Deploy**
 
 Para subir toda a sua infraestrutura de uma vez, execute:
 
@@ -361,6 +380,12 @@ Agora que temos 3 réplicas da API atrás do Nginx, vamos fazer o seguinte:
 
 Veremos 3 "Tasks" Rodando
 
+**Nota**: Se quiser listar todos os services ativos no node rode o comando `docker service ls`. Para listar as stacks ativas no seu Swarm use `dokcer stack ls
+
+Para remover um service use o comando `docker service rm <nome_do_service>`.
+
+Para remover uma stack inteira use `docker stack rm <nome_da_stack>`
+
 **3. Simule uma falha**:
 
 Liste os containers com o comando:
@@ -396,7 +421,67 @@ Para entender por que um container morreu ou por que o Swarm decidiu subir outro
 
 **Conceito chave**: Auditoria no Swarm é feita via service logs e inspect de tasks. 
 
+# Tutorial 2 - Entendendo Builds De Imagens Docker com Swarm
+
+O ponto cego de muitos profissionais ao migrar para o Swarm é: "O Swarm não possui o comando build". No docker-compose, o Docker faz o build e sobe o container em um único fluxo. No Swarm, o Build e o Deploy são etapas totalmente separadas. Vamos simular uma pequena API em Node.js.
+
+### Crie uma pasta para este tutorial
+Crie uma pasta para esse tutorial e entre nela
+```
+mkdir tutorial-build && cd tutorial-build
+mkdir api
+```
+
+Agora crie um arquivo chamado api/Dockerfile
+
+```
+FROM alpine
+# Apenas um comando que fica rodando e imprimindo a versão
+CMD ["sh", "-c", "echo 'API Versão 1.0 rodando' && sleep 3600"]
+```
+**O Build Manual (Obrigatório no Swarm)**
 
 
+Como o Swarm não sabe ler a instrução `build`:, precisamos "preparar o estoque" de imagens antes de pedir para o orquestrador trabalhar.
 
+Execute o build dando um nome (tag) claro para sua imagem:
+
+`docker build -t minha-api-local:v1 ./api`
+
+Quando você rodar a Stack, o Swarm vai procurar no seu Docker Engine uma imagem chamada `minha-api-local:v1`. Se ela não existir, ele tentará baixar do Docker Hub e falhará.
+
+**O arquivo da Stack (`stack.yml`)**
+
+
+Agora, crie o arquivo de deploy. Note que não existe a cláusula build.
+
+**O Deploy e a Falha Comum**
+
+Tente rodar:
+
+`docker stack deploy -c stack.yml tutorial_v2`
+
+Rode `docker service ps tutorial_v2_web`.
+
+**O que observar**: Como estamos em um node único, o Swarm vai encontrar a imagem `minha-api-local:v1` que você acabou de buildar e vai subir os containers com sucesso.
+
+**O Problema do "Update" (O Racional)**
+
+
+Imagine que você alterou o código da sua API. No `docker-compose`, você faria `docker-compose up --build`. No Swarm, o fluxo é:
+
+Alterar o Dockerfile (mude o texto de 'Versão 1.0' para 'Versão 2.0').
+
+Novo Build: `docker build -t minha-api-local:v2 ./api` (sempre mude a tag!).
+
+Atualizar o Serviço:
+
+`docker service update --image minha-api-local:v2 tutorial_v2_web`
+
+**Nota**: Evite a tag `:latest`. Se você buildar uma nova imagem com o mesmo nome `minha-api-local:latest`, o Swarm pode achar que a imagem é a mesma que ele já tem e não atualizar o container. Usar versões (v1, v2) garante a imutabilidade e facilita o rollback.
+
+**Conceito chave**: 
+- No Compose: `Código` -> `Up` (Build automático).
+
+- No Swarm: `Código` -> `Build Manual/pipeline` -> `Stack Deploy/Service Update`.
 
