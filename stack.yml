@@ -1,0 +1,52 @@
+services:
+  # O Nginx (Proxy Reverso)
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"      
+    networks:
+      - app_network
+    # Inclusão das Configs do Nginx
+    configs:
+      - source: nginx_config
+        target: /etc/nginx/nginx.conf
+    
+
+  # A API (usaremos uma imagem leve para teste)
+  api:
+    image: hashicorp/http-echo
+    command: ["-listen=:3000", "-text", "Resposta da Réplica da API"]
+    networks:
+      - app_network
+    deploy:
+      replicas: 3
+
+  # O Banco de Dados
+  db:
+    image: postgres:alpine
+    environment:
+      POSTGRES_DB: mydatabase
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - app_network
+    secrets:
+      - db_password
+
+volumes:
+  pg_data:
+    external: true
+
+networks:
+  app_network:
+    external: true
+
+secrets:
+  db_password:
+    external: true
+
+configs:
+  nginx_config:
+    file: ./nginx.conf
