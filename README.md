@@ -485,3 +485,79 @@ Atualizar o Serviço:
 
 - No Swarm: `Código` -> `Build Manual/pipeline` -> `Stack Deploy/Service Update`.
 
+# Tutorial 3 - Transformando seu Manager em um Registry Privado
+
+Neste cenário, o Registry será um Serviço do Swarm. Isso é elegante porque, se o Registry cair, o próprio Swarm o reinicia.
+
+## Passo 1: Criar o Serviço de Registry
+Diferente de um container comum, vamos publicar o Registry como um serviço global no cluster. Execute:
+
+```
+docker service create --name registry-local \
+--publish published=5000,target=5000 --mount \ type=volume, source=registry_data,target=/var/lib/registry registry:2
+```
+
+**Nota**: Por que o volume? Se o serviço reiniciar, não vamos perder as imagens já armazenadas. O registry_data garante a persistência.
+
+## Passo 2: Ajustar o HTTPS
+Por padrão, o Docker exige HTTPS para se comunicar com um Registry. Como estamos em ambiente local (`127.0.0.1` ou IP da rede local), precisamos avisar ao Docker que ele pode confiar no nosso Registry sem SSL (por enquanto).
+
+1. Edite o arquivo de configuração do Docker:
+
+`sudo nano /etc/docker/daemon.json`
+
+2. Adicione (ou crie) o seguinte conteúdo (substitua pelo seu IP se for usar outros nodes):
+
+```
+{
+  "insecure-registries" : ["127.0.0.1:5000"]
+}
+```
+3. Reinicie o Docker para aplicar:
+
+`sudo systemctl restart docker`
+
+## Passo 3: O Workflow de "Tag e Push"
+Agora o fluxo de trabalho muda. Você não apenas builda; você carimba e envia.
+
+**1. Build:**
+
+`docker build -t minha-api:v1 ./api`
+
+**2. Tag**
+
+Precisamos dizer ao Docker que essa imagem pertence ao nosso Registry local.
+
+`docker tag minha-api:v1 127.0.0.1:5000/minha-api:v1`
+
+**3. Push**
+
+`docker push 127.0.0.1:5000/minha-api:v1`
+
+
+## Passo 4: Atualizar o seu `stack.yml`
+
+Agora, no arquivo de deploy, a imagem não será mais o nome local, mas o endereço completo do Registry:
+
+```
+services:
+  api:
+    image: 127.0.0.1:5000/minha-api:v1
+    deploy:
+      replicas: 3
+
+```
+
+## Passo 5: Deploy com Autenticação
+
+Ao rodar o deploy, usamos a flag que garante que todos os nodes (mesmo que só tenhamos um agora) saibam como buscar a imagem:
+
+`docker stack deploy -c stack.yml meu_projeto --with-registry-auth`
+
+Ao usar este método, ganhamos:
+
+- Rastreabilidade: Você consegue listar o que está no seu registry (curl http://127.0.0.1:5000/v2/_catalog).
+
+- Padronização: O mesmo comando que você usa no Ubuntu (Minha Máquina) funcionará na AWS ou Azure, mudando apenas o endereço do Registry.
+
+- Isolamento: Se a internet cair, seu deploy continua funcionando porque as imagens estão "dentro de casa".
