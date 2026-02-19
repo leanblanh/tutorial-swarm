@@ -1,0 +1,8 @@
+services:
+  web:
+    image: 127.0.0.1:5000/minha-api:v3
+    ports:
+      - "80:80"
+    deploy:
+      replicas: 3
+    
